@@ -7,9 +7,10 @@ import (
 
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/strmatcher"
-	"v2ray.com/core/features/routing"
+
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/strmatcher"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
 )
 
 type Condition interface {
@@ -67,6 +68,24 @@ type DomainMatcher struct {
 	matchers strmatcher.IndexMatcher
 }
 
+func NewMphMatcherGroup(domains []*Domain) (*DomainMatcher, error) {
+	g := strmatcher.NewMphMatcherGroup()
+	for _, d := range domains {
+		matcherType, f := matcherTypeMap[d.Type]
+		if !f {
+			return nil, newError("unsupported domain type", d.Type)
+		}
+		_, err := g.AddPattern(d.Value, matcherType)
+		if err != nil {
+			return nil, err
+		}
+	}
+	g.Build()
+	return &DomainMatcher{
+		matchers: g,
+	}, nil
+}
+
 func NewDomainMatcher(domains []*Domain) (*DomainMatcher, error) {
 	g := new(strmatcher.MatcherGroup)
 	for _, d := range domains {
@@ -83,7 +102,7 @@ func NewDomainMatcher(domains []*Domain) (*DomainMatcher, error) {
 }
 
 func (m *DomainMatcher) ApplyDomain(domain string) bool {
-	return len(m.matchers.Match(domain)) > 0
+	return len(m.matchers.Match(strings.ToLower(domain))) > 0
 }
 
 // Apply implements Condition.

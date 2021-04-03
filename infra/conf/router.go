@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	"github.com/golang/protobuf/proto"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/platform/filesystem"
+
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/platform/filesystem"
 )
 
 type RouterRulesConfig struct {
@@ -40,6 +41,8 @@ type RouterConfig struct {
 	RuleList       []json.RawMessage  `json:"rules"`
 	DomainStrategy *string            `json:"domainStrategy"`
 	Balancers      []*BalancingRule   `json:"balancers"`
+
+	DomainMatcher string `json:"domainMatcher"`
 }
 
 func (c *RouterConfig) getDomainStrategy() router.Config_DomainStrategy {
@@ -80,6 +83,11 @@ func (c *RouterConfig) Build() (*router.Config, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if rule.DomainMatcher == "" {
+			rule.DomainMatcher = c.DomainMatcher
+		}
+
 		config.Rule = append(config.Rule, rule)
 	}
 	for _, rawBalancer := range c.Balancers {
@@ -96,6 +104,8 @@ type RouterRule struct {
 	Type        string `json:"type"`
 	OutboundTag string `json:"outboundTag"`
 	BalancerTag string `json:"balancerTag"`
+
+	DomainMatcher string `json:"domainMatcher"`
 }
 
 func ParseIP(s string) (*router.CIDR, error) {
@@ -473,6 +483,10 @@ func parseFieldRule(msg json.RawMessage) (*router.RoutingRule, error) {
 		}
 	default:
 		return nil, newError("neither outboundTag nor balancerTag is specified in routing rule")
+	}
+
+	if rawFieldRule.DomainMatcher != "" {
+		rule.DomainMatcher = rawFieldRule.DomainMatcher
 	}
 
 	if rawFieldRule.Domain != nil {

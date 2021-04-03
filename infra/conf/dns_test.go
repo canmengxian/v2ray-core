@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"v2ray.com/core/app/dns"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/platform"
-	"v2ray.com/core/common/platform/filesystem"
-	. "v2ray.com/core/infra/conf"
+
+	"github.com/v2fly/v2ray-core/v4/app/dns"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/platform"
+	"github.com/v2fly/v2ray-core/v4/common/platform/filesystem"
+	. "github.com/v2fly/v2ray-core/v4/infra/conf"
 )
 
 func init() {
@@ -70,16 +71,18 @@ func TestDNSConfigParsing(t *testing.T) {
 					"address": "8.8.8.8",
 					"clientIp": "10.0.0.1",
 					"port": 5353,
-					"domains": ["domain:v2ray.com"]
+					"domains": ["domain:v2fly.org"]
 				}],
 				"hosts": {
-					"v2ray.com": "127.0.0.1",
+					"v2fly.org": "127.0.0.1",
 					"domain:example.com": "google.com",
 					"geosite:test": "10.0.0.1",
 					"keyword:google": "8.8.8.8",
 					"regexp:.*\\.com": "8.8.4.4"
 				},
-				"clientIp": "10.0.0.1"
+				"clientIp": "10.0.0.1",
+				"queryStrategy": "UseIPv4",
+				"disableCache": true
 			}`,
 			Parser: parserCreator(),
 			Output: &dns.Config{
@@ -98,12 +101,12 @@ func TestDNSConfigParsing(t *testing.T) {
 						PrioritizedDomain: []*dns.NameServer_PriorityDomain{
 							{
 								Type:   dns.DomainMatchingType_Subdomain,
-								Domain: "v2ray.com",
+								Domain: "v2fly.org",
 							},
 						},
 						OriginalRules: []*dns.NameServer_OriginalRule{
 							{
-								Rule: "domain:v2ray.com",
+								Rule: "domain:v2fly.org",
 								Size: 1,
 							},
 						},
@@ -132,11 +135,13 @@ func TestDNSConfigParsing(t *testing.T) {
 					},
 					{
 						Type:   dns.DomainMatchingType_Full,
-						Domain: "v2ray.com",
+						Domain: "v2fly.org",
 						Ip:     [][]byte{{127, 0, 0, 1}},
 					},
 				},
-				ClientIp: []byte{10, 0, 0, 1},
+				ClientIp:      []byte{10, 0, 0, 1},
+				QueryStrategy: dns.QueryStrategy_USE_IP4,
+				DisableCache:  true,
 			},
 		},
 	})

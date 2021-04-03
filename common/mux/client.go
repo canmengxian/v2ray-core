@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/buf"
-	"v2ray.com/core/common/errors"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/protocol"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/common/signal/done"
-	"v2ray.com/core/common/task"
-	"v2ray.com/core/proxy"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/pipe"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/buf"
+	"github.com/v2fly/v2ray-core/v4/common/errors"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/protocol"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/common/signal/done"
+	"github.com/v2fly/v2ray-core/v4/common/task"
+	"github.com/v2fly/v2ray-core/v4/proxy"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/pipe"
 )
 
 type ClientManager struct {
@@ -131,8 +131,18 @@ type DialingWorkerFactory struct {
 	Proxy    proxy.Outbound
 	Dialer   internet.Dialer
 	Strategy ClientStrategy
+
+	ctx context.Context
 }
 
+func NewDialingWorkerFactory(ctx context.Context, proxy proxy.Outbound, dialer internet.Dialer, strategy ClientStrategy) *DialingWorkerFactory {
+	return &DialingWorkerFactory{
+		Proxy:    proxy,
+		Dialer:   dialer,
+		Strategy: strategy,
+		ctx:      ctx,
+	}
+}
 func (f *DialingWorkerFactory) Create() (*ClientWorker, error) {
 	opts := []pipe.Option{pipe.WithSizeLimit(64 * 1024)}
 	uplinkReader, upLinkWriter := pipe.New(opts...)
@@ -148,7 +158,7 @@ func (f *DialingWorkerFactory) Create() (*ClientWorker, error) {
 	}
 
 	go func(p proxy.Outbound, d internet.Dialer, c common.Closable) {
-		ctx := session.ContextWithOutbound(context.Background(), &session.Outbound{
+		ctx := session.ContextWithOutbound(f.ctx, &session.Outbound{
 			Target: net.TCPDestination(muxCoolAddress, muxCoolPort),
 		})
 		ctx, cancel := context.WithCancel(ctx)

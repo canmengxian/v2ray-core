@@ -5,9 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"v2ray.com/core/app/dns"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common/net"
+	"github.com/v2fly/v2ray-core/v4/app/dns"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/common/net"
 )
 
 type NameServerConfig struct {
@@ -120,10 +120,12 @@ var typeMap = map[router.Domain_Type]dns.DomainMatchingType{
 
 // DNSConfig is a JSON serializable object for dns.Config.
 type DNSConfig struct {
-	Servers  []*NameServerConfig `json:"servers"`
-	Hosts    map[string]*Address `json:"hosts"`
-	ClientIP *Address            `json:"clientIp"`
-	Tag      string              `json:"tag"`
+	Servers       []*NameServerConfig `json:"servers"`
+	Hosts         map[string]*Address `json:"hosts"`
+	ClientIP      *Address            `json:"clientIp"`
+	Tag           string              `json:"tag"`
+	QueryStrategy string              `json:"queryStrategy"`
+	DisableCache  bool                `json:"disableCache"`
 }
 
 func getHostMapping(addr *Address) *dns.Config_HostMapping {
@@ -140,7 +142,8 @@ func getHostMapping(addr *Address) *dns.Config_HostMapping {
 // Build implements Buildable
 func (c *DNSConfig) Build() (*dns.Config, error) {
 	config := &dns.Config{
-		Tag: c.Tag,
+		Tag:          c.Tag,
+		DisableCache: c.DisableCache,
 	}
 
 	if c.ClientIP != nil {
@@ -150,16 +153,22 @@ func (c *DNSConfig) Build() (*dns.Config, error) {
 		config.ClientIp = []byte(c.ClientIP.IP())
 	}
 
+	config.QueryStrategy = dns.QueryStrategy_USE_IP
+	switch strings.ToLower(c.QueryStrategy) {
+	case "useip", "use_ip", "use-ip":
+		config.QueryStrategy = dns.QueryStrategy_USE_IP
+	case "useip4", "useipv4", "use_ip4", "use_ipv4", "use_ip_v4", "use-ip4", "use-ipv4", "use-ip-v4":
+		config.QueryStrategy = dns.QueryStrategy_USE_IP4
+	case "useip6", "useipv6", "use_ip6", "use_ipv6", "use_ip_v6", "use-ip6", "use-ipv6", "use-ip-v6":
+		config.QueryStrategy = dns.QueryStrategy_USE_IP6
+	}
+
 	for _, server := range c.Servers {
 		ns, err := server.Build()
 		if err != nil {
 			return nil, newError("failed to build nameserver").Base(err)
 		}
 		config.NameServer = append(config.NameServer, ns)
-	}
-
-	if BootstrapDNS() {
-		newError("Bootstrap DNS: ", bootstrapDNS).AtWarning().WriteToLog()
 	}
 
 	if c.Hosts != nil && len(c.Hosts) > 0 {

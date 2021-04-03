@@ -3,20 +3,20 @@ package outbound
 import (
 	"context"
 
-	"v2ray.com/core"
-	"v2ray.com/core/app/proxyman"
-	"v2ray.com/core/common"
-	"v2ray.com/core/common/mux"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/session"
-	"v2ray.com/core/features/outbound"
-	"v2ray.com/core/features/policy"
-	"v2ray.com/core/features/stats"
-	"v2ray.com/core/proxy"
-	"v2ray.com/core/transport"
-	"v2ray.com/core/transport/internet"
-	"v2ray.com/core/transport/internet/tls"
-	"v2ray.com/core/transport/pipe"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/app/proxyman"
+	"github.com/v2fly/v2ray-core/v4/common"
+	"github.com/v2fly/v2ray-core/v4/common/mux"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/session"
+	"github.com/v2fly/v2ray-core/v4/features/outbound"
+	"github.com/v2fly/v2ray-core/v4/features/policy"
+	"github.com/v2fly/v2ray-core/v4/features/stats"
+	"github.com/v2fly/v2ray-core/v4/proxy"
+	"github.com/v2fly/v2ray-core/v4/transport"
+	"github.com/v2fly/v2ray-core/v4/transport/internet"
+	"github.com/v2fly/v2ray-core/v4/transport/internet/tls"
+	"github.com/v2fly/v2ray-core/v4/transport/pipe"
 )
 
 func getStatCounter(v *core.Instance, tag string) (stats.Counter, stats.Counter) {
@@ -108,14 +108,15 @@ func NewHandler(ctx context.Context, config *core.OutboundHandlerConfig) (outbou
 		h.mux = &mux.ClientManager{
 			Enabled: h.senderSettings.MultiplexSettings.Enabled,
 			Picker: &mux.IncrementalWorkerPicker{
-				Factory: &mux.DialingWorkerFactory{
-					Proxy:  proxyHandler,
-					Dialer: h,
-					Strategy: mux.ClientStrategy{
+				Factory: mux.NewDialingWorkerFactory(
+					ctx,
+					proxyHandler,
+					h,
+					mux.ClientStrategy{
 						MaxConcurrency: config.Concurrency,
 						MaxConnection:  128,
 					},
-				},
+				),
 			},
 		}
 	}
@@ -159,7 +160,7 @@ func (h *Handler) Address() net.Address {
 // Dial implements internet.Dialer.
 func (h *Handler) Dial(ctx context.Context, dest net.Destination) (internet.Connection, error) {
 	if h.senderSettings != nil {
-		if h.senderSettings.ProxySettings.HasTag() {
+		if h.senderSettings.ProxySettings.HasTag() && !h.senderSettings.ProxySettings.TransportLayerProxy {
 			tag := h.senderSettings.ProxySettings.Tag
 			handler := h.outboundManager.GetHandler(tag)
 			if handler != nil {
@@ -194,6 +195,12 @@ func (h *Handler) Dial(ctx context.Context, dest net.Destination) (internet.Conn
 			}
 			outbound.Gateway = h.senderSettings.Via.AsAddress()
 		}
+	}
+
+	if h.senderSettings != nil && h.senderSettings.ProxySettings != nil && h.senderSettings.ProxySettings.HasTag() && h.senderSettings.ProxySettings.TransportLayerProxy {
+		tag := h.senderSettings.ProxySettings.Tag
+		newError("transport layer proxying to ", tag, " for dest ", dest).AtDebug().WriteToLog(session.ExportIDToError(ctx))
+		ctx = session.SetTransportLayerProxyTagToContext(ctx, tag)
 	}
 
 	conn, err := internet.Dial(ctx, dest, h.streamSettings)

@@ -5,28 +5,24 @@ package dns
 import (
 	"context"
 	"net/url"
+	"strings"
 	"time"
 
-	"v2ray.com/core"
-	"v2ray.com/core/app/router"
-	"v2ray.com/core/common/errors"
-	"v2ray.com/core/common/net"
-	"v2ray.com/core/common/strmatcher"
-	"v2ray.com/core/features/routing"
+	core "github.com/v2fly/v2ray-core/v4"
+	"github.com/v2fly/v2ray-core/v4/app/router"
+	"github.com/v2fly/v2ray-core/v4/common/errors"
+	"github.com/v2fly/v2ray-core/v4/common/net"
+	"github.com/v2fly/v2ray-core/v4/common/strmatcher"
+	"github.com/v2fly/v2ray-core/v4/features/dns"
+	"github.com/v2fly/v2ray-core/v4/features/routing"
 )
-
-// IPOption is an object for IP query options.
-type IPOption struct {
-	IPv4Enable bool
-	IPv6Enable bool
-}
 
 // Server is the interface for Name Server.
 type Server interface {
 	// Name of the Client.
 	Name() string
 	// QueryIP sends IP queries to its configured server.
-	QueryIP(ctx context.Context, domain string, clientIP net.IP, option IPOption) ([]net.IP, error)
+	QueryIP(ctx context.Context, domain string, clientIP net.IP, option dns.IPOption, disableCache bool) ([]net.IP, error)
 }
 
 // Client is the interface for DNS client.
@@ -47,14 +43,16 @@ func NewServer(dest net.Destination, dispatcher routing.Dispatcher) (Server, err
 			return nil, err
 		}
 		switch {
-		case u.String() == "localhost":
+		case strings.EqualFold(u.String(), "localhost"):
 			return NewLocalNameServer(), nil
-		case u.Scheme == "https": // DOH Remote mode
+		case strings.EqualFold(u.Scheme, "https"): // DOH Remote mode
 			return NewDoHNameServer(u, dispatcher)
-		case u.Scheme == "https+local": // DOH Local mode
+		case strings.EqualFold(u.Scheme, "https+local"): // DOH Local mode
 			return NewDoHLocalNameServer(u), nil
-		case u.Scheme == "quic+local": // DNS-over-QUIC Local mode
+		case strings.EqualFold(u.Scheme, "quic+local"): // DNS-over-QUIC Local mode
 			return NewQUICNameServer(u)
+		case strings.EqualFold(u.String(), "fakedns"):
+			return NewFakeDNSServer(), nil
 		}
 	}
 	if dest.Network == net.Network_Unknown {
@@ -67,7 +65,7 @@ func NewServer(dest net.Destination, dispatcher routing.Dispatcher) (Server, err
 }
 
 // NewClient creates a DNS client managing a name server with client IP, domain rules and expected IPs.
-func NewClient(ctx context.Context, ns *NameServer, clientIP net.IP, container router.GeoIPMatcherContainer, updateDomainRule func(strmatcher.Matcher, int) error) (*Client, error) {
+func NewClient(ctx context.Context, ns *NameServer, clientIP net.IP, container router.GeoIPMatcherContainer, matcherInfos *[]DomainMatcherInfo, updateDomainRule func(strmatcher.Matcher, int, []DomainMatcherInfo) error) (*Client, error) {
 	client := &Client{}
 	err := core.RequireFeatures(ctx, func(dispatcher routing.Dispatcher) error {
 		// Create a new server for each client for now
@@ -80,6 +78,19 @@ func NewClient(ctx context.Context, ns *NameServer, clientIP net.IP, container r
 		if _, isLocalDNS := server.(*LocalNameServer); isLocalDNS {
 			ns.PrioritizedDomain = append(ns.PrioritizedDomain, localTLDsAndDotlessDomains...)
 			ns.OriginalRules = append(ns.OriginalRules, localTLDsAndDotlessDomainsRule)
+			// The following lines is a solution to avoid core panics（rule index out of range） when setting `localhost` DNS client in config.
+			// Because the `localhost` DNS client will apend len(localTLDsAndDotlessDomains) rules into matcherInfos to match `geosite:private` default rule.
+			// But `matcherInfos` has no enough length to add rules, which leads to core panics (rule index out of range).
+			// To avoid this, the length of `matcherInfos` must be equal to the expected, so manually append it with Golang default zero value first for later modification.
+			// Related issues:
+			// https://github.com/v2fly/v2ray-core/issues/529
+			// https://github.com/v2fly/v2ray-core/issues/719
+			for i := 0; i < len(localTLDsAndDotlessDomains); i++ {
+				*matcherInfos = append(*matcherInfos, DomainMatcherInfo{
+					clientIdx:     uint16(0),
+					domainRuleIdx: uint16(0),
+				})
+			}
 		}
 
 		// Establish domain rules
@@ -106,7 +117,7 @@ func NewClient(ctx context.Context, ns *NameServer, clientIP net.IP, container r
 				rules = append(rules, domainRule.String())
 				ruleCurr++
 			}
-			err = updateDomainRule(domainRule, originalRuleIdx)
+			err = updateDomainRule(domainRule, originalRuleIdx, *matcherInfos)
 			if err != nil {
 				return newError("failed to create prioritized domain").Base(err).AtWarning()
 			}
@@ -171,9 +182,9 @@ func (c *Client) Name() string {
 }
 
 // QueryIP send DNS query to the name server with the client's IP.
-func (c *Client) QueryIP(ctx context.Context, domain string, option IPOption) ([]net.IP, error) {
+func (c *Client) QueryIP(ctx context.Context, domain string, option dns.IPOption, disableCache bool) ([]net.IP, error) {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	ips, err := c.server.QueryIP(ctx, domain, c.clientIP, option)
+	ips, err := c.server.QueryIP(ctx, domain, c.clientIP, option, disableCache)
 	cancel()
 
 	if err != nil {
